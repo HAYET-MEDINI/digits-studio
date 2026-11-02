@@ -1,6 +1,6 @@
 # 🔢 Digits Studio
 
-[![CI](https://github.com/<votre-compte>/digits-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/<votre-compte>/digits-studio/actions/workflows/ci.yml)
+[![CI](https://github.com/HAYET-MEDINI/digits-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/HAYET-MEDINI/digits-studio/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-MLP-orange)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
@@ -77,7 +77,7 @@ Les scores sur de vraies photos seront plus bas et dépendent de l'écriture et 
 ## Installation
 
 ```bash
-git clone https://github.com/<votre-compte>/digits-studio.git
+git clone https://github.com/HAYET-MEDINI/digits-studio.git
 cd digits-studio
 
 python -m venv .venv
