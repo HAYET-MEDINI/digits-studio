@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digits Studio</title>
+<style>
+  :root { --bg:#0e1116; --card:#171b22; --line:#2a303a; --txt:#e8ecf1; --mut:#8b95a5; --acc:#7cf5c0; --warn:#ffb454; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; } p.sub { color:var(--mut); margin:0 0 20px; }
+  .stage { position:relative; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:#000; touch-action:none; }
+  .stage canvas { display:block; width:100%; height:auto; }
+  #overlay { position:absolute; inset:0; pointer-events:none; }
+  .bar { display:flex; gap:12px; align-items:center; margin:12px 0 24px; flex-wrap:wrap; }
+  button { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:8px 16px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  label { color:var(--mut); display:flex; gap:8px; align-items:center; }
+  .result { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; text-align:center; }
+  #number { font-size:clamp(2.5rem,10vw,5rem); font-weight:700; letter-spacing:.08em; color:var(--acc); min-height:1.2em; }
+  #words { color:var(--mut); font-style:italic; min-height:1.5em; }
+  .cards { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:18px; }
+  .dcard { background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:10px; width:120px; }
+  .dcard canvas { width:64px; height:64px; image-rendering:pixelated; border-radius:6px; background:#000; }
+  .dcard .big { font-size:1.8rem; font-weight:700; }
+  .meter { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin:4px 0; }
+  .meter i { display:block; height:100%; background:var(--acc); }
+  .low .meter i { background:var(--warn); } .low .big { color:var(--warn); }
+  .alt { color:var(--mut); font-size:.78rem; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button.on { border-color:var(--acc); color:var(--acc); }
+  .drop { border:2px dashed var(--line); border-radius:14px; padding:28px 16px; text-align:center; color:var(--mut); cursor:pointer; transition:.15s; }
+  .drop.over, .drop:hover { border-color:var(--acc); color:var(--txt); }
+  .drop b { color:var(--txt); }
+  #photoStage { margin-top:12px; } #photoStage canvas { background:#000; }
+  .err { color:var(--warn); margin:10px 0 0; min-height:1.4em; }
+  select { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font:inherit; }
+  [hidden] { display:none !important; }
+  .hint { color:var(--mut); font-size:.85rem; margin-top:16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Digits Studio</h1>
+  <p class="sub">Écrivez un nombre à la main (plusieurs chiffres possibles), l’IA le lit, le découpe et l’énonce.</p>
+
+  <div class="tabs">
+    <button id="tabDraw" class="on">✏️ Dessiner</button>
+    <button id="tabImg">🖼️ Importer une image</button>
+  </div>
+
+  <div id="paneImg" hidden>
+    <div class="drop" id="drop">
+      <b>Glissez une photo ou un scan ici</b>, cliquez pour choisir un fichier, ou collez avec Ctrl+V.<br>
+      Papier, cahier, tableau, ombres, stylo fin ou feutre : le fond est nettoyé automatiquement.
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+    <div class="bar">
+      <label>Encre
+        <select id="polarity">
+          <option value="auto">détection automatique</option>
+          <option value="dark">foncée sur fond clair</option>
+          <option value="light">claire sur fond foncé</option>
+        </select>
+      </label>
+      <button id="again" hidden>Relire</button>
+    </div>
+    <div class="stage" id="photoStage" hidden><canvas id="photo" width="960" height="320"></canvas></div>
+    <p class="err" id="err"></p>
+  </div>
+
+  <div id="paneDraw">
+  <div class="stage">
+    <canvas id="pad" width="960" height="320"></canvas>
+    <canvas id="overlay" width="960" height="320"></canvas>
+  </div>
+  <div class="bar">
+    <button id="clear">Effacer</button>
+    <label>Épaisseur <input type="range" id="size" min="8" max="30" value="16"></label>
+    <span id="status" class="alt"></span>
+  </div>
+  </div>
+
+  <section class="result">
+    <div id="number">—</div>
+    <div id="words"></div>
+    <div class="cards" id="cards"></div>
+  </section>
+  <p class="hint">Astuce : laissez un petit espace entre les chiffres. Les cartes oranges signalent une lecture peu sûre.
+    Le modèle voit chaque chiffre en 8×8 pixels, comme ci-dessus.</p>
+</main>
+
+<script>
+const pad = document.getElementById('pad'), ov = document.getElementById('overlay');
+const ctx = pad.getContext('2d'), octx = ov.getContext('2d');
+const status = document.getElementById('status');
+ctx.fillStyle = '#000'; ctx.fillRect(0, 0, pad.width, pad.height);
+ctx.lineCap = ctx.lineJoin = 'round'; ctx.strokeStyle = '#fff';
+let drawing = false, last = null, timer = null;
+
+const pos = e => { const r = pad.getBoundingClientRect();
+  return { x:(e.clientX - r.left) * pad.width / r.width, y:(e.clientY - r.top) * pad.height / r.height }; };
+
+pad.addEventListener('pointerdown', e => { drawing = true; last = pos(e); pad.setPointerCapture(e.pointerId); clearTimeout(timer); });
+pad.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const p = pos(e); ctx.lineWidth = +document.getElementById('size').value;
+  ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p;
+});
+const end = () => { if (!drawing) return; drawing = false; timer = setTimeout(predict, 500); };
+pad.addEventListener('pointerup', end); pad.addEventListener('pointercancel', end);
+
+document.getElementById('clear').onclick = () => {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, pad.width, pad.height); octx.clearRect(0, 0, ov.width, ov.height);
+  document.getElementById('number').textContent = '—';
+  document.getElementById('words').textContent = ''; document.getElementById('cards').innerHTML = '';
+};
+
+async function predict() {
+  status.textContent = 'Lecture…';
+  try {
+    const r = await fetch('/predict', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ image: pad.toDataURL('image/png') }) });
+    render(await r.json()); status.textContent = '';
+  } catch (e) { status.textContent = 'Erreur serveur'; }
+}
+
+function render(res, canvas = ov, g = octx) {
+  document.getElementById('number').textContent = res.number || '—';
+  document.getElementById('words').textContent = res.words || '';
+  const k = Math.max(1, canvas.width / 960);
+  g.lineWidth = 2 * k; g.font = `600 ${22 * k}px system-ui`; g.textBaseline = 'top';
+  const cards = document.getElementById('cards'); cards.innerHTML = '';
+  res.digits.forEach(d => {
+    const [x0, x1, y0, y1] = d.box, low = d.confidence < 0.75, m = 6 * k;
+    g.strokeStyle = g.fillStyle = low ? '#ffb454' : '#7cf5c0';
+    g.strokeRect(x0 - m, y0 - m, x1 - x0 + 2 * m, y1 - y0 + 2 * m);
+    g.fillText(d.digit, x0 - m, Math.max(2, y0 - 34 * k));
+    const c = document.createElement('div'); c.className = 'dcard' + (low ? ' low' : '');
+    const t = document.createElement('canvas'); t.width = t.height = 8;
+    const tc = t.getContext('2d'), im = tc.createImageData(8, 8);
+    d.thumb.flat().forEach((v, i) => { const gr = Math.round(v * 255); im.data.set([gr, gr, gr, 255], i * 4); });
+    tc.putImageData(im, 0, 0);
+    c.appendChild(t);
+    c.insertAdjacentHTML('beforeend',
+      `<div class="big">${d.digit}</div><div class="meter"><i style="width:${(d.confidence*100).toFixed(0)}%"></i></div>` +
+      `<div class="alt">${(d.confidence*100).toFixed(0)} % · ou ${d.alternatives.map(a => a.digit).join(', ')}</div>`);
+    cards.appendChild(c);
+  });
+}
+// le rendu du canvas efface d'abord l'overlay
+const _render = render;
+render = (res, c = ov, g = octx) => { g.clearRect(0, 0, c.width, c.height); _render(res, c, g); };
+
+/* ---------- onglets ---------- */
+const paneDraw = document.getElementById('paneDraw'), paneImg = document.getElementById('paneImg');
+function tab(img) {
+  paneDraw.hidden = img; paneImg.hidden = !img;
+  document.getElementById('tabDraw').classList.toggle('on', !img);
+  document.getElementById('tabImg').classList.toggle('on', img);
+}
+document.getElementById('tabDraw').onclick = () => tab(false);
+document.getElementById('tabImg').onclick = () => tab(true);
+
+/* ---------- import d'image ---------- */
+const drop = document.getElementById('drop'), fileIn = document.getElementById('file');
+const photo = document.getElementById('photo'), pctx = photo.getContext('2d');
+let lastFile = null;
+
+drop.onclick = () => fileIn.click();
+fileIn.onchange = () => fileIn.files[0] && readImage(fileIn.files[0]);
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => e.dataTransfer.files[0] && readImage(e.dataTransfer.files[0]));
+document.addEventListener('paste', e => {
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+  if (f) { tab(true); readImage(f); }
+});
+document.getElementById('polarity').onchange = () => lastFile && readImage(lastFile);
+document.getElementById('again').onclick = () => lastFile && readImage(lastFile);
+
+async function readImage(file) {
+  lastFile = file; document.getElementById('again').hidden = false;
+  const err = document.getElementById('err'); err.textContent = 'Lecture de l’image…';
+  const fd = new FormData(); fd.append('file', file); fd.append('polarity', document.getElementById('polarity').value);
+  try {
+    const r = await fetch('/predict_image', { method: 'POST', body: fd }), res = await r.json();
+    if (!r.ok) { err.textContent = res.error || 'Erreur'; return; }
+    const img = new Image();
+    img.onload = () => {
+      photo.width = res.size[0]; photo.height = res.size[1];
+      pctx.drawImage(img, 0, 0);
+      document.getElementById('photoStage').hidden = false;
+      _render(res, photo, pctx);   // sans effacement : on garde l’image nettoyée dessinée dessous
+      err.textContent = res.error || '';
+    };
+    img.src = res.preview;
+  } catch (e) { err.textContent = 'Erreur serveur'; }
+}
+</script>
+</body>
+</html>
